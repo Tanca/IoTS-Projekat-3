@@ -1,0 +1,14 @@
+{
+  "name": "@iot-event-brokers/event-generator",
+  "version": "0.1.0",
+  "description": "Reusable CSV dataset loader and SensorReading event generator for MQTT and Kafka experiments.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "preview": "node scripts/preview-events.js --count 5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

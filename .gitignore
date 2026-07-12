@@ -1,0 +1,19 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Trained model artefacts (regenerated at Docker build time by train_model.py)
+maas-service/model/
+maas-service/data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

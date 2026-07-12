@@ -1,0 +1,174 @@
+# Project 3 — self-contained stack.
+#
+# Pipeline:
+#   ingestion -> MQTT (iot/readings) -> { storage -> Postgres,
+#                                         eKuiper CEP -> iot/events }
+#   analytics consumes iot/readings + iot/events, calls the MaaS ML service,
+#   republishes enriched results to iot/analytics, and serves the dashboard.
+#
+# The ingestion + storage services and the shared event-generator/dataset were
+# carried over from Project 2 — only the pieces this project actually needs.
+#
+# Run from this folder:  docker compose up -d --build
+# Then feed the stream:  docker compose run --rm ingestion-service
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: p3-postgres
+    environment:
+      POSTGRES_DB: iotdb
+      POSTGRES_USER: iotuser
+      POSTGRES_PASSWORD: iotpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - p3_postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iotuser -d iotdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: p3-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - p3_mosquitto_data:/mosquitto/data
+      - p3_mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t healthcheck -m ok >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # eKuiper CEP engine. Its default MQTT source server is pointed at the broker
+  # so the iot_readings stream reads from mosquitto (requirement 2).
+  ekuiper:
+    image: lfedge/ekuiper:1.14
+    container_name: p3-ekuiper
+    environment:
+      MQTT_SOURCE__DEFAULT__SERVER: "tcp://mosquitto:1883"
+      KUIPER__BASIC__CONSOLELOG: "true"
+    ports:
+      - "9081:9081"
+    volumes:
+      - p3_ekuiper_data:/kuiper/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot: registers the source stream + CEP rules via the eKuiper REST API.
+  ekuiper-setup:
+    image: curlimages/curl:8.11.1
+    container_name: p3-ekuiper-setup
+    volumes:
+      - ./ekuiper/setup-rules.sh:/setup/setup-rules.sh:ro
+    entrypoint: ["sh", "/setup/setup-rules.sh"]
+    environment:
+      EKUIPER_URL: "http://ekuiper:9081"
+      MQTT_SERVER: "tcp://mosquitto:1883"
+      SOURCE_TOPIC: "iot/readings"
+      EVENTS_TOPIC: "iot/events"
+    depends_on:
+      - ekuiper
+    restart: "no"
+
+  # MaaS: trains the scikit-learn model at build time, serves it over REST.
+  maas-service:
+    build:
+      context: .
+      dockerfile: maas-service/Dockerfile
+    container_name: p3-maas-service
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Upgraded Analytics: CEP consumer + MaaS client + dashboard.
+  analytics-service:
+    build:
+      context: .
+      dockerfile: analytics-service/Dockerfile
+    container_name: p3-analytics-service
+    environment:
+      MQTT_URL: "mqtt://mosquitto:1883"
+      READINGS_TOPIC: "iot/readings"
+      EVENTS_TOPIC: "iot/events"
+      ANALYTICS_TOPIC: "iot/analytics"
+      MAAS_URL: "http://maas-service:8000"
+      HTTP_PORT: "8080"
+      WINDOW_SECONDS: "10"
+      # Cold-average alert: flag any 10s window whose avg air temp drops below this.
+      ALERT_THRESHOLD: "11"
+      # Max concurrent MaaS prediction calls (backpressure valve).
+      MAAS_MAX_INFLIGHT: "16"
+      # Dashboard "live stream" replay rate (readings/sec) when Start is clicked.
+      STREAM_RATE: "5"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      maas-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Persists readings to Postgres (carried over from Project 2, unchanged).
+  storage-service:
+    build:
+      context: ./storage-service
+      dockerfile: Dockerfile
+    container_name: p3-storage-service
+    environment:
+      MQTT_URL: "mqtt://mosquitto:1883"
+      MQTT_TOPIC: "iot/readings"
+      MQTT_QOS: "1"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: iotdb
+      POSTGRES_USER: iotuser
+      POSTGRES_PASSWORD: iotpass
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Publishes generated SensorReading events, then exits (carried over from
+  # Project 2). Behind a profile so it does NOT auto-start with `up`; run it
+  # explicitly once the CEP rules are live:
+  #   docker compose run --rm ingestion-service
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: ingestion-service/Dockerfile
+    container_name: p3-ingestion-service
+    profiles: ["ingest"]
+    environment:
+      MQTT_URL: "mqtt://mosquitto:1883"
+      MQTT_TOPIC: "iot/readings"
+      MQTT_QOS: "1"
+      TOTAL_MESSAGES: "${TOTAL_MESSAGES:-300}"
+      MESSAGES_PER_SECOND: "${MESSAGES_PER_SECOND:-20}"
+      DEVICE_COUNT: "${DEVICE_COUNT:-10}"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  p3_postgres_data:
+  p3_mosquitto_data:
+  p3_mosquitto_log:
+  p3_ekuiper_data:

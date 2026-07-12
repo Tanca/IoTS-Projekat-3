@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="sr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Analitika — CEP + MaaS kontrolna tabla</title>
+  <style>
+    :root {
+      --bg: #0f1420; --panel: #171e2e; --panel-2: #1e2740; --border: #2a3550;
+      --text: #e6ecf5; --muted: #93a1bd; --accent: #4f8cff; --ok: #35c98a;
+      --warn: #ffb020; --bad: #ff5d6c; --chip: #243050;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f6fb; --panel: #ffffff; --panel-2: #f0f3fa; --border: #dce2ee;
+        --text: #16203a; --muted: #5a6b8c; --accent: #2f6bff; --ok: #12a06a;
+        --warn: #b9791a; --bad: #d63c4a; --chip: #eef2fb;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.45;
+    }
+    header {
+      padding: 20px 24px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+    header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    .controls { display: flex; align-items: center; gap: 8px; }
+    .btn {
+      cursor: pointer; border: 1px solid var(--border); background: var(--panel-2);
+      color: var(--text); padding: 7px 13px; border-radius: 9px; font-size: 13px;
+      font-weight: 600; transition: border-color .15s ease, opacity .15s ease;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--accent); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn.start { color: var(--ok); }
+    .btn.stop { color: var(--bad); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.stream-on { background: var(--ok); box-shadow: 0 0 0 3px rgba(53,201,138,.18); animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+    .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(53,201,138,.18); }
+    .dot.off { background: var(--bad); }
+    main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; gap: 16px; }
+    .tiles { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px; }
+    .cols { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+    .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+    .tile .label { color: var(--muted); font-size: 13px; }
+    .tile .value { font-size: 30px; font-weight: 680; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .tile .value.small { font-size: 17px; }
+    .bars { display: flex; flex-direction: column; gap: 9px; }
+    .bar-row { display: grid; grid-template-columns: 130px 1fr 42px; align-items: center; gap: 10px; font-size: 13px; }
+    .bar-track { background: var(--panel-2); border-radius: 6px; height: 12px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 6px; background: var(--accent); transition: width .3s ease; }
+    .bar-row .num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    .scroll { overflow-x: auto; max-height: 360px; overflow-y: auto; }
+    .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--chip); border: 1px solid var(--border); }
+    .chip.COLD_AIR { color: var(--accent); }
+    .chip.WARM_SPELL { color: #f0883e; }
+    .chip.HIGH_HUMIDITY { color: var(--warn); }
+    .chip.COLD_DAMP { color: var(--bad); }
+    .chip.WINDOW_COLD_AVG { color: var(--accent); }
+    .legend h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 0 0 9px; font-weight: 600; }
+    .legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+    .legend ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+    .legend li { display: flex; align-items: center; gap: 8px; }
+    .legend p { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
+    .legend b { color: var(--text); font-weight: 600; }
+    .legend .k { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pill { padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); }
+    .muted { color: var(--muted); }
+    .model dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+    .model dt { color: var(--muted); }
+    .model dd { margin: 0; font-variant-numeric: tabular-nums; }
+    footer { color: var(--muted); font-size: 12px; text-align: center; padding: 18px; }
+    code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>IoT Analitika — eKuiper CEP + MaaS ML</h1>
+      <div class="sub">Projekat 3 · Analitički mikroservis koji spaja striming CEP događaje sa ML predikcijama</div>
+    </div>
+    <div class="controls">
+      <button class="btn start" id="btn-start">▶ Pokreni striming</button>
+      <button class="btn stop" id="btn-stop" disabled>■ Zaustavi</button>
+      <span style="margin-left:6px" class="dot" id="stream-dot"></span><span id="stream-text">neaktivno</span>
+      <span style="margin-left:14px" class="dot" id="ws-dot"></span><span id="ws-text">povezivanje…</span>
+      <span style="margin-left:14px" class="dot" id="maas-dot"></span><span>MaaS</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid tiles">
+      <div class="card tile"><div class="label">Senzorska očitavanja</div><div class="value" id="t-readings">0</div></div>
+      <div class="card tile"><div class="label">CEP događaji (eKuiper)</div><div class="value" id="t-events">0</div></div>
+      <div class="card tile"><div class="label">ML predikcije (MaaS)</div><div class="value" id="t-preds">0</div></div>
+      <div class="card tile"><div class="label">Pros. temp. poslednjeg prozora</div><div class="value small" id="t-window">—</div></div>
+    </div>
+
+    <div class="grid cols">
+      <div class="card">
+        <h2>Tipovi CEP događaja</h2>
+        <div class="bars" id="event-bars"><div class="muted">Čekanje na događaje…</div></div>
+      </div>
+      <div class="card">
+        <h2>ML predviđene klase</h2>
+        <div class="bars" id="ml-bars"><div class="muted">Čekanje na predikcije…</div></div>
+      </div>
+      <div class="card model">
+        <h2>MaaS model — kartica</h2>
+        <div id="model-card" class="muted">Učitavanje informacija o modelu…</div>
+      </div>
+    </div>
+
+    <div class="grid cols" style="margin-top:16px">
+      <div class="card">
+        <h2>Skorašnji CEP događaji → ML predikcija</h2>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Vreme</th><th>Događaj</th><th>Uređaj</th><th>Temp</th><th>Vlaž</th><th>ML klasa</th></tr></thead>
+            <tbody id="events-body"><tr><td colspan="6" class="muted">Još nema događaja.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Skorašnja očitavanja → ML predikcija</h2>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Vreme</th><th>Uređaj</th><th>Temp</th><th>Vlaž</th><th>ML klasa</th><th>Pouzd.</th></tr></thead>
+            <tbody id="readings-body"><tr><td colspan="6" class="muted">Još nema očitavanja.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card legend">
+        <h2>Kako čitati ovu kontrolnu tablu</h2>
+        <div class="legend-grid">
+          <div>
+            <h3>ML klasa — predviđena temperatura mora</h3>
+            <p>Model predviđa opseg temperature <b>mora</b> na osnovu <b>temperature vazduha + vlažnosti</b> (78% tačnost na testu). Opsezi (po temp. mora):</p>
+            <ul>
+              <li><span class="pill">Hladno</span> <span class="muted">more ≤ 11.1 °C</span></li>
+              <li><span class="pill">Umereno</span> <span class="muted">more 11.1 – 13.8 °C</span></li>
+              <li><span class="pill">Toplo</span> <span class="muted">more &gt; 13.8 °C</span></li>
+            </ul>
+          </div>
+          <div>
+            <h3>CEP događaji — eKuiper pravila nad živim tokom</h3>
+            <ul>
+              <li><span class="chip COLD_AIR">Hladan vazduh</span> <span class="k muted">temp. vazduha &lt; 8 °C</span></li>
+              <li><span class="chip WARM_SPELL">Toplo vreme</span> <span class="k muted">temp. vazduha &gt; 15.3 °C</span></li>
+              <li><span class="chip HIGH_HUMIDITY">Visoka vlažnost</span> <span class="k muted">vlažnost &gt; 93 %</span></li>
+              <li><span class="chip COLD_DAMP">Hladno i vlažno</span> <span class="k muted">vazduh &lt; 9 °C I vlažnost &gt; 90 %</span></li>
+              <li><span class="chip WINDOW_COLD_AVG">Hladan prozor (10s)</span> <span class="k muted">pros. vazduha za 10 s &lt; 11 °C</span></li>
+            </ul>
+          </div>
+          <div>
+            <h3>Upozorenje prozora i vazduh vs more</h3>
+            <p><b>Pros. temp. poslednjeg prozora</b> je prosečna temperatura <b>vazduha</b> poslednjeg 10-sekundnog prozora; prikazuje <b>⚠</b> kada taj prosek padne ispod <b>11 °C</b> (hladan prozor).</p>
+            <p>CEP pravila prate temperaturu <b>vazduha</b>; ML klasa je opseg <b>mora</b>. More je stabilnije, pa je hladan vazduh iznad umerenog mora normalna pojava — nije nesklad.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Tok podataka: ingestija → <code>iot/readings</code> → eKuiper CEP → <code>iot/events</code> → Analitika → MaaS REST → kontrolna tabla
+  </footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => (n === null || n === undefined ? "—" : n);
+
+    // Serbian display labels for the ML classes and CEP event codes. The
+    // underlying codes stay unchanged (CSS classes, data keys, MQTT payloads).
+    const T_CLASS = { cold: "Hladno", mild: "Umereno", warm: "Toplo" };
+    const T_EVENT = {
+      COLD_AIR: "Hladan vazduh",
+      WARM_SPELL: "Toplo vreme",
+      HIGH_HUMIDITY: "Visoka vlažnost",
+      COLD_DAMP: "Hladno i vlažno",
+      WINDOW_COLD_AVG: "Hladan prozor (10s)"
+    };
+    const T_TASK = { classification: "klasifikacija", regression: "regresija" };
+    const T_FEAT = { temperature: "temperatura", humidity: "vlažnost" };
+    const tClass = (k) => T_CLASS[k] || k;
+    const tEvent = (k) => T_EVENT[k] || k;
+
+    function renderBars(containerId, counts, emptyText, labelFn) {
+      const el = $(containerId);
+      const entries = Object.entries(counts || {}).sort((a, b) => b[1] - a[1]);
+      if (!entries.length) { el.innerHTML = `<div class="muted">${emptyText}</div>`; return; }
+      const max = Math.max(...entries.map((e) => e[1]));
+      el.innerHTML = entries.map(([k, v]) => `
+        <div class="bar-row">
+          <span title="${k}">${labelFn ? labelFn(k) : k}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${Math.round((v / max) * 100)}%"></span></span>
+          <span class="num">${v}</span>
+        </div>`).join("");
+    }
+
+    function applyTotals(t) {
+      if (!t) return;
+      $("t-readings").textContent = t.totalReadings ?? 0;
+      $("t-events").textContent = t.totalEvents ?? 0;
+      $("t-preds").textContent = t.totalPredictions ?? 0;
+      renderBars("event-bars", t.eventCounts, "Čekanje na događaje…", tEvent);
+      renderBars("ml-bars", t.mlClassCounts, "Čekanje na predikcije…", tClass);
+      const dot = $("maas-dot");
+      dot.className = "dot " + (t.maasAvailable ? "on" : "off");
+      if (typeof t.streaming !== "undefined") applyStream(t.streaming);
+    }
+
+    function applyStream(streaming) {
+      $("btn-start").disabled = !!streaming;
+      $("btn-stop").disabled = !streaming;
+      $("stream-dot").className = "dot " + (streaming ? "stream-on" : "");
+      $("stream-text").textContent = streaming ? "strimuje" : "neaktivno";
+    }
+
+    async function setStream(action) {
+      try { await fetch(`/api/stream/${action}`, { method: "POST" }); }
+      catch (e) { /* ignore */ }
+    }
+
+    function rowEvent(e) {
+      const time = new Date(e.detectedAt).toLocaleTimeString();
+      const ml = e.prediction ? tClass(e.prediction.class) : "—";
+      return `<tr>
+        <td class="muted">${time}</td>
+        <td><span class="chip ${e.eventType}">${tEvent(e.eventType)}</span></td>
+        <td>${fmt(e.deviceId)}</td>
+        <td>${e.temperature !== null ? e.temperature.toFixed(1) : "—"}</td>
+        <td>${e.humidity !== null ? e.humidity.toFixed(1) : "—"}</td>
+        <td>${ml}</td></tr>`;
+    }
+
+    function rowReading(r) {
+      const time = new Date(r.receivedAt).toLocaleTimeString();
+      const cls = r.prediction ? tClass(r.prediction.class) : "—";
+      const conf = r.prediction ? (r.prediction.confidence * 100).toFixed(0) + "%" : "—";
+      return `<tr>
+        <td class="muted">${time}</td>
+        <td>${fmt(r.deviceId)}</td>
+        <td>${r.temperature.toFixed(1)}</td>
+        <td>${r.humidity.toFixed(1)}</td>
+        <td><span class="pill">${cls}</span></td>
+        <td class="muted">${conf}</td></tr>`;
+    }
+
+    const eventsBuf = [];
+    const readingsBuf = [];
+    const CAP = 40;
+
+    function pushRow(buf, bodyId, html) {
+      buf.unshift(html);
+      if (buf.length > CAP) buf.length = CAP;
+      $(bodyId).innerHTML = buf.join("");
+    }
+
+    function setWindow(w) {
+      if (!w) return;
+      $("t-window").textContent = `${w.avgTemperature}°C${w.alert ? " ⚠" : ""}`;
+    }
+
+    async function bootstrap() {
+      try {
+        const [summary, events, readings] = await Promise.all([
+          fetch("/api/summary").then((r) => r.json()),
+          fetch("/api/events").then((r) => r.json()),
+          fetch("/api/readings").then((r) => r.json())
+        ]);
+        applyTotals(summary);
+        setWindow(summary.lastWindow);
+        // Rebuild the tables from the authoritative server state (avoids the
+        // periodic refresh appending duplicates on top of WebSocket-pushed rows).
+        eventsBuf.length = 0;
+        readingsBuf.length = 0;
+        events.slice().reverse().forEach((e) => pushRow(eventsBuf, "events-body", rowEvent(e)));
+        readings.slice().reverse().forEach((r) => pushRow(readingsBuf, "readings-body", rowReading(r)));
+      } catch (e) { /* API još nije spreman */ }
+
+      try {
+        const model = await fetch("/api/model").then((r) => r.json());
+        renderModel(model);
+      } catch (e) {
+        $("model-card").textContent = "Informacije o MaaS modelu nisu dostupne.";
+      }
+    }
+
+    function renderModel(m) {
+      if (!m || m.error) { $("model-card").textContent = "Informacije o MaaS modelu nisu dostupne."; return; }
+      const target = m.target === "sea_temp_band" ? "opseg temperature mora" : m.target;
+      $("model-card").innerHTML = `<dl>
+        <dt>Algoritam</dt><dd>${m.model_type}</dd>
+        <dt>Zadatak</dt><dd>${T_TASK[m.task] || m.task}</dd>
+        <dt>Cilj</dt><dd>${target}</dd>
+        <dt>Atributi</dt><dd>${(m.features || []).map((f) => T_FEAT[f] || f).join(", ")}</dd>
+        <dt>Klase</dt><dd>${(m.classes || []).map(tClass).join(", ")}</dd>
+        <dt>Tačnost (test)</dt><dd>${m.test ? (m.test.accuracy * 100).toFixed(1) + "%" : "—"}</dd>
+        <dt>Makro-F1 (test)</dt><dd>${m.test ? m.test.macro_f1 : "—"}</dd>
+        <dt>Uzorci</dt><dd>${m.samples ? m.samples.total : "—"}</dd>
+      </dl>`;
+    }
+
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => { $("ws-dot").className = "dot on"; $("ws-text").textContent = "uživo"; };
+      ws.onclose = () => {
+        $("ws-dot").className = "dot off"; $("ws-text").textContent = "ponovno povezivanje…";
+        setTimeout(connect, 1500);
+      };
+      ws.onmessage = (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.totals) applyTotals(data.totals);
+        if (data.type === "event") pushRow(eventsBuf, "events-body", rowEvent(data.item));
+        else if (data.type === "reading") pushRow(readingsBuf, "readings-body", rowReading(data.item));
+        else if (data.type === "window") setWindow(data.item);
+        else if (data.type === "stream") applyStream(data.streaming);
+        else if (data.type === "snapshot") { applyTotals(data.totals); setWindow(data.lastWindow); }
+      };
+    }
+
+    $("btn-start").onclick = () => setStream("start");
+    $("btn-stop").onclick = () => setStream("stop");
+
+    bootstrap();
+    connect();
+    setInterval(bootstrap, 15000);
+  </script>
+</body>
+</html>

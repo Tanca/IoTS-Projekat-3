@@ -1,0 +1,10 @@
+# Keep the Docker build context small: none of these are COPY-ed by any Dockerfile.
+**/node_modules
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+.gitattributes
+*.docx
+maas-service/model
+maas-service/data
